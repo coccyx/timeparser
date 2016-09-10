@@ -1,9 +1,11 @@
-//
+// Package timeparser implements Splunk's relative time syntax, or attempts to guess as
+// best as possible if not relative time.
 package timeparser
 
 import (
 	"fmt"
 	"github.com/joyt/godate"
+	"math"
 	"regexp"
 	"strconv"
 	"time"
@@ -15,10 +17,20 @@ var (
 	re        *regexp.Regexp = regexp.MustCompile(reltimere)
 	now                      = time.Now
 	loc       *time.Location
+
+	secs  = map[string]bool{"s": true, "sec": true, "secs": true, "second": true, "seconds": true}
+	mins  = map[string]bool{"m": true, "min": true, "minute": true, "minutes": true}
+	hours = map[string]bool{"h": true, "hr": true, "hrs": true, "hour": true, "hours": true}
+	days  = map[string]bool{"d": true, "day": true, "days": true}
+	weeks = map[string]bool{"w": true, "week": true, "weeks": true,
+		"w0": true, "w1": true, "w2": true, "w3": true, "w4": true, "w5": true, "w6": true}
+	months   = map[string]bool{"mon": true, "month": true, "months": true}
+	quarters = map[string]bool{"q": true, "qtr": true, "qtrs": true, "quarter": true, "quarters": true}
+	years    = map[string]bool{"y": true, "yr": true, "yrs": true, "year": true, "years": true}
 )
 
 func init() {
-	loc, _ = time.LoadLocation("local")
+	loc, _ = time.LoadLocation("Local")
 }
 
 // TimeParser returns a parsed time based on the current time in the local time zone
@@ -56,6 +68,50 @@ func TimeParserNowInLocation(ts string, now func() time.Time, loc *time.Location
 			if len(results["plusminus"]) != 0 && len(results["num"]) != 0 && len(results["unit"]) != 0 {
 				timeParserTimeMath(results["plusminus"], results["num"], results["unit"], &ret)
 
+				fmt.Printf("%#v\n", results)
+				snapunit := results["snapunit"]
+				if len(snapunit) > 0 {
+					switch {
+					case secs[snapunit]:
+						ret = time.Date(ret.Year(), ret.Month(), ret.Day(), ret.Hour(), ret.Minute(), ret.Second(), 0, loc)
+					case mins[snapunit]:
+						ret = time.Date(ret.Year(), ret.Month(), ret.Day(), ret.Hour(), ret.Minute(), 0, 0, loc)
+					case hours[snapunit]:
+						ret = time.Date(ret.Year(), ret.Month(), ret.Day(), ret.Hour(), 0, 0, 0, loc)
+					case days[snapunit]:
+						ret = time.Date(ret.Year(), ret.Month(), ret.Day(), 0, 0, 0, 0, loc)
+					case weeks[snapunit]:
+						// Only w[0-6] have length of 2
+						if len(snapunit) == 2 {
+							wdnum, err := strconv.Atoi(snapunit[1:2])
+							if err != nil {
+								return ret, err
+							}
+							wd := int(ret.Weekday())
+
+							if wdnum <= wd {
+								ret = ret.Add(time.Duration(24*(wdnum-wd)) * time.Hour)
+								ret = time.Date(ret.Year(), ret.Month(), ret.Day(), 0, 0, 0, 0, loc)
+							} else {
+								ret = ret.Add(time.Duration(24*7*-1) * time.Hour)
+								ret = ret.Add(time.Duration(24*-1*wd) * time.Hour)
+								ret = ret.Add(time.Duration(24*wdnum) * time.Hour)
+								ret = time.Date(ret.Year(), ret.Month(), ret.Day(), 0, 0, 0, 0, loc)
+							}
+						}
+					case months[snapunit]:
+						ret = time.Date(ret.Year(), ret.Month(), 1, 0, 0, 0, 0, loc)
+					case quarters[snapunit]:
+						tmonth := int(math.Floor(float64(ret.Month()/3)) * 3)
+						ret = time.Date(ret.Year(), time.Month(tmonth), 1, 0, 0, 0, 0, loc)
+					case years[snapunit]:
+						ret = time.Date(ret.Year(), 1, 1, 0, 0, 0, 0, loc)
+					}
+
+					if len(results["snapplusminus"]) != 0 && len(results["snaprelnum"]) != 0 && len(results["snaprelunit"]) != 0 {
+						timeParserTimeMath(results["snapplusminus"], results["snaprelnum"], results["snaprelunit"], &ret)
+					}
+				}
 				return ret, nil
 			}
 		} else { // We're not a relative time, so try our best to interpret the date passed
@@ -70,15 +126,6 @@ func timeParserTimeMath(plusminus string, numstr string, unit string, ret *time.
 	if plusminus == "-" {
 		num *= -1
 	}
-
-	secs := map[string]bool{"s": true, "sec": true, "secs": true, "second": true, "seconds": true}
-	mins := map[string]bool{"m": true, "min": true, "minute": true, "minutes": true}
-	hours := map[string]bool{"h": true, "hr": true, "hrs": true, "hour": true, "hours": true}
-	days := map[string]bool{"d": true, "day": true, "days": true}
-	weeks := map[string]bool{"w": true, "week": true, "weeks": true}
-	months := map[string]bool{"mon": true, "month": true, "months": true}
-	quarters := map[string]bool{"q": true, "qtr": true, "qtrs": true, "quarter": true, "quarters": true}
-	years := map[string]bool{"y": true, "yr": true, "yrs": true, "year": true, "years": true}
 
 	switch {
 	case secs[unit]:
