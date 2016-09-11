@@ -68,7 +68,6 @@ func TimeParserNowInLocation(ts string, now func() time.Time, loc *time.Location
 			if len(results["plusminus"]) != 0 && len(results["num"]) != 0 && len(results["unit"]) != 0 {
 				timeParserTimeMath(results["plusminus"], results["num"], results["unit"], &ret)
 
-				fmt.Printf("%#v\n", results)
 				snapunit := results["snapunit"]
 				if len(snapunit) > 0 {
 					switch {
